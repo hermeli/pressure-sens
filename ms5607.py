@@ -1,10 +1,13 @@
 #!/usr/bin/python3
 # ---------------------------------------------------------- 
-# p3-ms5607.py
+# ms5607.py
 # 
 # Sample program to read the pressure of a MS5607 pressure
 # sensor over I2C bus. 24.07.2014 - wyss@superspider.net
 # Program must be executed as root user 'sudo ./ms5607.py'
+# 
+# Used quick2wire API because I2C transfer is non-Standard
+# (read 3 bytes after device address without command byte)
 # ----------------------------------------------------------
 
 import quick2wire.i2c as i2c
@@ -37,9 +40,6 @@ PROM_READ		= 0xA0 	# + (address << 1)
 
 P_data = [.0,.0,.0,.0,.0,.0,.0,.0]
 
-def runningMean(data, N):
-    return np.convolve(data, np.ones((N,))/N)[(N-1):]
-
 def sendCmd(cmd):
 	bus.transaction(i2c.writing_bytes(DEVICE1, cmd))
 
@@ -52,7 +52,6 @@ def read3ByteVal():
 	byte1,byte2,byte3 = bus.transaction(i2c.reading(DEVICE1,3))[0]
 	val = (byte1<<16)+(byte2<<8)+(byte3)
 	return val
-
 
 with i2c.I2CMaster(1) as bus:  
 	sendCmd(RESET)
@@ -83,10 +82,6 @@ with i2c.I2CMaster(1) as bus:
 	C6 = read2ByteVal()
 	print("C6: %d" % C6)
 	
-	# a = np.random.random(100)
-	# b = runningMean(a,5)
-	
-
 	while True:
 		# read pressure and temperature
 		sendCmd(CONV_D1_256)
