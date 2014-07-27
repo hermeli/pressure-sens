@@ -1,17 +1,15 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # ---------------------------------------------------------- 
-# ms5607.py
+# p3-ms5607.py
 # 
 # Sample program to read the pressure of a MS5607 pressure
 # sensor over I2C bus. 24.07.2014 - wyss@superspider.net
 # Program must be executed as root user 'sudo ./ms5607.py'
 # ----------------------------------------------------------
 
-import smbus
+import quick2wire.i2c as i2c
 import time
-
-#bus = smbus.SMBus(0) # Rev 1 Pi uses bus 0
-bus = smbus.SMBus(1)  # Rev 2 Pi uses bus 1
+import numpy as np
 
 # device address
 DEVICE1 = 0x76
@@ -37,28 +35,96 @@ CONV_D2_4096	= 0x58
 ADC_READ		= 0x00
 PROM_READ		= 0xA0 	# + (address << 1) 
 
-# reset sensor
-bus.write_byte(DEVICE1,RESET)
-time.sleep(0.003)
+P_data = [.0,.0,.0,.0,.0,.0,.0,.0]
 
-bus.write_byte(DEVICE1,CONV_D1_512)
-bus.write_byte(DEVICE1,ADC_READ)
+def runningMean(data, N):
+    return np.convolve(data, np.ones((N,))/N)[(N-1):]
 
-val = bus.read_word_data(DEVICE1,0)
-#pressure = [0,0,0]
-#pressure = bus.read_i2c_block_data(DEVICE1,0)
+def sendCmd(cmd):
+	bus.transaction(i2c.writing_bytes(DEVICE1, cmd))
 
-print val[0]
-print val[1]
-print val[2]
+def read2ByteVal():
+	byte1,byte2 = bus.transaction(i2c.reading(DEVICE1,2))[0]
+	val = (byte1<<8)+byte2
+	return val
 
-# this call only needed once at very first start and the delay should be in higher level
-# b.write_quick(0x27)
-# time.sleep(0.050)    # allow time for the conversion
-# normally would expect an array defined at higher level
-# val = [0,0,0,0]
-# tell python which array to store results into and give correct number of parameters
-# val = b.read_i2c_block_data( 0X27, 0 )
-# X1 = (val[0] << 8) + val[1]
-# Y1 = (val[2] << 8) + val[3]
-# print"%02x" % Y1
+def read3ByteVal():
+	byte1,byte2,byte3 = bus.transaction(i2c.reading(DEVICE1,3))[0]
+	val = (byte1<<16)+(byte2<<8)+(byte3)
+	return val
+
+
+with i2c.I2CMaster(1) as bus:  
+	sendCmd(RESET)
+	time.sleep(.003)
+
+	# read PROM values
+	sendCmd(PROM_READ+(1<<1))
+	C1 = read2ByteVal()
+	print("C1: %d" % C1)
+	
+	sendCmd(PROM_READ+(2<<1))
+	C2 = read2ByteVal()
+	print("C2: %d" % C2)
+	
+	sendCmd(PROM_READ+(3<<1))
+	C3 = read2ByteVal()
+	print("C3: %d" % C3)
+	
+	sendCmd(PROM_READ+(4<<1))
+	C4 = read2ByteVal()
+	print("C4: %d" % C4)
+	
+	sendCmd(PROM_READ+(5<<1))
+	C5 = read2ByteVal()
+	print("C5: %d" % C5)
+	
+	sendCmd(PROM_READ+(6<<1))
+	C6 = read2ByteVal()
+	print("C6: %d" % C6)
+	
+	# a = np.random.random(100)
+	# b = runningMean(a,5)
+	
+
+	while True:
+		# read pressure and temperature
+		sendCmd(CONV_D1_256)
+		sendCmd(ADC_READ)
+		time.sleep(.01)
+		D1 = read3ByteVal()
+		# print("D1: %d" % D1)
+		
+		sendCmd(CONV_D2_256)
+		sendCmd(ADC_READ)
+		time.sleep(.01)
+		D2 = read3ByteVal()
+		# print("D2: %d" % D2)
+		
+		# calculate temperature
+		dT = D2-C5*(2**8)
+		# print("dT (Difference T_act and T_ref): %d" % dT)
+		
+		TEMP = (2000+dT*C6/(2**23))/100.0
+		# print("TEMP: %d" % TEMP)
+		
+		OFF = C2*(2**17)+(C4*dT)/(2**6)
+		# print("OFF: %d" % OFF)
+		
+		SENS = C1*(2**16)+(C3*dT)/(2**7)
+		# print("SENS: %d" % SENS)
+		
+		P = (D1*SENS/(2**21)-OFF)/(2**15)/100.0
+		# print("P: %d" % P)
+		
+		# Mittelwert der Sensordaten
+		P_data = np.roll(P_data,1)
+		P_data[0] = P
+		# print(P_data)
+		P_mean = np.mean(P_data)
+		
+		print("Temperatur: %.2f °C" % TEMP)
+		print("Luftdruck: %.2f mBar" % P_mean)
+		
+		time.sleep(1)
+	
